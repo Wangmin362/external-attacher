@@ -216,7 +216,7 @@ func main() {
 	var (
 		supportsAttach                    bool
 		supportsReadOnly                  bool
-		supportsListVolumesPublishedNodes bool // 这个参数觉得external-attacher是否监听VolumeAttachment资源对象并进行Reconcile
+		supportsListVolumesPublishedNodes bool // 这个参数决定external-attacher是否监听VolumeAttachment资源对象并进行Reconcile
 		supportsSingleNodeMultiWriter     bool
 	)
 	if !supportsService {
@@ -229,6 +229,8 @@ func main() {
 			os.Exit(1)
 		}
 
+		// 如果CSI存储插件支持Attach/Detach Volume，那么就需要处理VolumeAttachment资源对象，并调用CSI存储插件的
+		// ControllerPublishVolume以及ControllerUnpublishVolume方法进行Volume的Attach/Detach动作
 		if supportsAttach {
 			pvLister := factory.Core().V1().PersistentVolumes().Lister()
 			vaLister := factory.Storage().V1().VolumeAttachments().Lister()

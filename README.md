@@ -2,6 +2,8 @@
 
 The external-attacher is a sidecar container that attaches volumes to nodes by calling `ControllerPublish` and `ControllerUnpublish` functions of CSI drivers. It is necessary because internal Attach/Detach controller running in Kubernetes controller-manager does not have any direct interfaces to CSI drivers.
 
+![](doc/arch1.png)
+
 ## Terminology
 
 In Kubernetes, the term *attach* means 3rd party volume attachment to a node. This is common in cloud environments, where the cloud API is able to attach a volume to a node without any code running on the node. In CSI terminology, this corresponds to the `ControllerPublish` call.

@@ -67,6 +67,7 @@ type CSIAttachController struct {
 
 // Handler is responsible for handling VolumeAttachment events from informer.
 type Handler interface {
+	// Init TODO 这里初始化了个啥？
 	Init(vaQueue workqueue.RateLimitingInterface, pvQueue workqueue.RateLimitingInterface)
 
 	// SyncNewOrUpdatedVolumeAttachment processes one Add/Updated event from
