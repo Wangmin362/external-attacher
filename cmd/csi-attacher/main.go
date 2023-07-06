@@ -42,6 +42,19 @@ import (
 	"google.golang.org/grpc"
 )
 
+/* CSINode资源对象示例
+apiVersion: storage.k8s.io/v1
+kind: CSINode
+spec:
+  drivers:
+  - name: rook-ceph.cephfs.csi.ceph.com
+    nodeID: node4
+    topologyKeys: null
+  - name: rook-ceph.rbd.csi.ceph.com
+    nodeID: node4
+    topologyKeys: null
+*/
+
 const (
 
 	// Default timeout of short CSI calls like GetPluginInfo
@@ -202,7 +215,7 @@ func main() {
 	var (
 		supportsAttach                    bool
 		supportsReadOnly                  bool
-		supportsListVolumesPublishedNodes bool
+		supportsListVolumesPublishedNodes bool // 这个参数觉得external-attacher是否监听VolumeAttachment资源对象并进行Reconcile
 		supportsSingleNodeMultiWriter     bool
 	)
 	if !supportsService {
