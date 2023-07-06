@@ -234,10 +234,12 @@ func (h *csiHandler) SyncNewOrUpdatedVolumeAttachment(va *storage.VolumeAttachme
 	if err != nil {
 		// Re-queue with exponential backoff
 		klog.V(2).Infof("Error processing %q: %s", va.Name, err)
+		// 如果VA资源处理异常，那么再次把VA资源对象放入到队列当中
 		h.vaQueue.AddRateLimited(va.Name)
 		return
 	}
 	// The operation has finished successfully, reset exponential backoff
+	// 如果VA资源对象已经成功处理，那么删除这个资源
 	h.vaQueue.Forget(va.Name)
 	klog.V(4).Infof("CSIHandler: finished processing %q", va.Name)
 }
@@ -626,6 +628,7 @@ func (h *csiHandler) SyncNewOrUpdatedPersistentVolume(pv *v1.PersistentVolume) {
 	klog.V(4).Infof("CSIHandler: processing PV %q", pv.Name)
 	// Sync and remove finalizer on given PV
 	if pv.DeletionTimestamp == nil {
+		// 如果PV没有被删除
 		ignore := true
 
 		// if the PV is migrated this means CSIMigration is disabled so we need to remove the finalizer
@@ -652,6 +655,7 @@ func (h *csiHandler) SyncNewOrUpdatedPersistentVolume(pv *v1.PersistentVolume) {
 	}
 
 	// Check if the PV has finalizer
+	// 获取Finalizer
 	finalizer := GetFinalizerName(h.attacherName)
 	found := false
 	for _, f := range pv.Finalizers {
@@ -707,6 +711,7 @@ func (h *csiHandler) SyncNewOrUpdatedPersistentVolume(pv *v1.PersistentVolume) {
 	}
 
 	klog.V(2).Infof("Removed finalizer from PV %q", pv.Name)
+	// 如果PV正确处理了，那么删除这个元素
 	h.pvQueue.Forget(pv.Name)
 
 	return

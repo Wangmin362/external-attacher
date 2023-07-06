@@ -137,7 +137,9 @@ func (ctrl *CSIAttachController) Run(workers int, stopCh <-chan struct{}) {
 		return
 	}
 	for i := 0; i < workers; i++ {
+		// TODO 从VAQueue中取出元素并处理VolumeAttachment资源对象
 		go wait.Until(ctrl.syncVA, 0, stopCh)
+		// TODO 从PVQueue中取出元素并处理PersistentVolume资源对象
 		go wait.Until(ctrl.syncPV, 0, stopCh)
 	}
 
