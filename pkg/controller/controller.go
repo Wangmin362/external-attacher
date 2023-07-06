@@ -84,7 +84,9 @@ type Handler interface {
 }
 
 // NewCSIAttachController returns a new *CSIAttachController
-func NewCSIAttachController(client kubernetes.Interface, attacherName string, handler Handler, volumeAttachmentInformer storageinformers.VolumeAttachmentInformer, pvInformer coreinformers.PersistentVolumeInformer, vaRateLimiter, paRateLimiter workqueue.RateLimiter, shouldReconcileVolumeAttachment bool, reconcileSync time.Duration) *CSIAttachController {
+func NewCSIAttachController(client kubernetes.Interface, attacherName string, handler Handler,
+	volumeAttachmentInformer storageinformers.VolumeAttachmentInformer, pvInformer coreinformers.PersistentVolumeInformer,
+	vaRateLimiter, paRateLimiter workqueue.RateLimiter, shouldReconcileVolumeAttachment bool, reconcileSync time.Duration) *CSIAttachController {
 	broadcaster := record.NewBroadcaster()
 	broadcaster.StartRecordingToSink(&corev1.EventSinkImpl{Interface: client.CoreV1().Events(v1.NamespaceAll)})
 	var eventRecorder record.EventRecorder
@@ -225,6 +227,7 @@ func (ctrl *CSIAttachController) syncVA() {
 		klog.V(4).Infof("Skipping VolumeAttachment %s for attacher %s", va.Name, va.Spec.Attacher)
 		return
 	}
+	// 处理VolumeAttachment
 	ctrl.handler.SyncNewOrUpdatedVolumeAttachment(va)
 }
 

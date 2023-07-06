@@ -225,8 +225,10 @@ func (h *csiHandler) SyncNewOrUpdatedVolumeAttachment(va *storage.VolumeAttachme
 
 	var err error
 	if va.DeletionTimestamp == nil {
+		// 说明是创建或者更新VolumeAttachment
 		err = h.syncAttach(va)
 	} else {
+		// 删除时间不为空，说明时删除VolumeAttachment
 		err = h.syncDetach(va)
 	}
 	if err != nil {
@@ -264,6 +266,7 @@ func (h *csiHandler) syncAttach(va *storage.VolumeAttachment) error {
 	klog.V(2).Infof("Attached %q", va.Name)
 
 	// Mark as attached
+	// 实际上就是把VolumeAttachment.Status.Attached属性设置为True
 	if _, err := markAsAttached(h.client, va, metadata); err != nil {
 		return fmt.Errorf("failed to mark as attached: %s", err)
 	}

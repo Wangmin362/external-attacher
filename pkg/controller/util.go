@@ -36,6 +36,7 @@ import (
 
 func markAsAttached(client kubernetes.Interface, va *storage.VolumeAttachment, metadata map[string]string) (*storage.VolumeAttachment, error) {
 	klog.V(4).Infof("Marking as attached %q", va.Name)
+	// TODO 为什么这里需要克隆？
 	clone := va.DeepCopy()
 	clone.Status.Attached = true
 	clone.Status.AttachmentMetadata = metadata

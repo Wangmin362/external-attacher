@@ -50,8 +50,9 @@ const (
 
 // Command line flags
 var (
-	kubeconfig    = flag.String("kubeconfig", "", "Absolute path to the kubeconfig file. Required only when running out of cluster.")
-	resync        = flag.Duration("resync", 10*time.Minute, "Resync interval of the controller.")
+	kubeconfig = flag.String("kubeconfig", "", "Absolute path to the kubeconfig file. Required only when running out of cluster.")
+	resync     = flag.Duration("resync", 10*time.Minute, "Resync interval of the controller.")
+	// CSI插件的Socket文件路径
 	csiAddress    = flag.String("csi-address", "/run/csi/socket", "Address of the CSI driver socket.")
 	showVersion   = flag.Bool("version", false, "Show version.")
 	timeout       = flag.Duration("timeout", 15*time.Second, "Timeout for waiting for attaching or detaching the volume.")
@@ -118,6 +119,7 @@ func main() {
 		os.Exit(1)
 	}
 
+	// 实例化ClientSet,后续可以通过它访问APIServer
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		klog.Error(err.Error())
@@ -130,12 +132,15 @@ func main() {
 
 	// Connect to CSI.
 	connection.SetMaxGRPCLogLength(*maxGRPCLogLength)
+	// 和CSI插件建立GRPC连接
 	csiConn, err := connection.Connect(*csiAddress, metricsManager, connection.OnConnectionLoss(connection.ExitOnConnectionLoss()))
 	if err != nil {
 		klog.Error(err.Error())
 		os.Exit(1)
 	}
 
+	// 通过GRPC调用IdentityClient的Probe方法探测CSI插件是否就绪，如果CSI插件没有就绪，那么external-attacher会一直等待CSI插件，直到
+	// CSI插件就绪
 	err = rpc.ProbeForever(csiConn, *timeout)
 	if err != nil {
 		klog.Error(err.Error())
@@ -145,6 +150,7 @@ func main() {
 	// Find driver name.
 	ctx, cancel := context.WithTimeout(context.Background(), csiTimeout)
 	defer cancel()
+	// 通过GRPC调用IdentityClient服务的GetPluginInfo接口获取CSI插件的名字
 	csiAttacher, err := rpc.GetDriverName(ctx, csiConn)
 	if err != nil {
 		klog.Error(err.Error())
@@ -153,6 +159,8 @@ func main() {
 	klog.V(2).Infof("CSI driver name: %q", csiAttacher)
 
 	translator := csitrans.New()
+	// 1、如果当前的CSI插件是之前K8S InTree的存储插件，那么需要重新建立GRPC连接，重新探测CSI插件是否就绪。
+	// 2、这里重新建立GRPC连接时的参数发生了改变
 	if translator.IsMigratedCSIDriverByName(csiAttacher) {
 		metricsManager = metrics.NewCSIMetricsManagerWithOptions(csiAttacher, metrics.WithMigration())
 		migratedCsiClient, err := connection.Connect(*csiAddress, metricsManager, connection.OnConnectionLoss(connection.ExitOnConnectionLoss()))
@@ -184,6 +192,7 @@ func main() {
 		}()
 	}
 
+	// 通过GRPC调用CSI插件IdentityClient服务的GetPluginCapabilities接口获取插件的能力，从而判断CSI插件是否具有ControllerService能力
 	supportsService, err := supportsPluginControllerService(ctx, csiConn)
 	if err != nil {
 		klog.Error(err.Error())
@@ -210,7 +219,9 @@ func main() {
 			pvLister := factory.Core().V1().PersistentVolumes().Lister()
 			vaLister := factory.Storage().V1().VolumeAttachments().Lister()
 			csiNodeLister := factory.Storage().V1().CSINodes().Lister()
+			// 负责把Volueme Attach到某个节点或者Detach到某个节点
 			volAttacher := attacher.NewAttacher(csiConn)
+			// 遍历当前CSI插件有哪些Volume
 			CSIVolumeLister := attacher.NewVolumeLister(csiConn)
 			handler = controller.NewCSIHandler(
 				clientset,
@@ -241,8 +252,8 @@ func main() {
 		clientset,
 		csiAttacher,
 		handler,
-		factory.Storage().V1().VolumeAttachments(),
-		factory.Core().V1().PersistentVolumes(),
+		factory.Storage().V1().VolumeAttachments(), // 监听VolumeAttachment
+		factory.Core().V1().PersistentVolumes(),    // 监听PersistentVolume
 		workqueue.NewItemExponentialFailureRateLimiter(*retryIntervalStart, *retryIntervalMax),
 		workqueue.NewItemExponentialFailureRateLimiter(*retryIntervalStart, *retryIntervalMax),
 		supportsListVolumesPublishedNodes,
@@ -294,6 +305,7 @@ func buildConfig(kubeconfig string) (*rest.Config, error) {
 	return rest.InClusterConfig()
 }
 
+// 通过GRPC调用CSI插件ControllerClient服务的ControllerGetCapabilities接口从而获取插件能力
 func supportsControllerCapabilities(ctx context.Context, csiConn *grpc.ClientConn) (bool, bool, bool, bool, error) {
 	caps, err := rpc.GetControllerCapabilities(ctx, csiConn)
 	if err != nil {
