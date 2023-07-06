@@ -132,6 +132,7 @@ func GetFinalizerName(driver string) string {
 func GetNodeIDFromCSINode(driver string, csiNode *storage.CSINode) (string, bool) {
 	for _, d := range csiNode.Spec.Drivers {
 		if d.Name == driver {
+			// 这里的NodeID实际上就是Node的名字
 			return d.NodeID, true
 		}
 	}

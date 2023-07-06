@@ -58,21 +58,35 @@ var _ VolumeLister = &attacher.CSIVolumeLister{}
 // It adds finalizer to VolumeAttachment instance to make sure they're detached
 // before deletion.
 type csiHandler struct {
-	client                        kubernetes.Interface
-	attacherName                  string
-	attacher                      attacher.Attacher
-	CSIVolumeLister               VolumeLister
-	pvLister                      corelisters.PersistentVolumeLister
-	csiNodeLister                 storagelisters.CSINodeLister
-	vaLister                      storagelisters.VolumeAttachmentLister
-	vaQueue, pvQueue              workqueue.RateLimitingInterface
-	forceSync                     map[string]bool
-	forceSyncMux                  sync.Mutex
-	timeout                       time.Duration
-	supportsPublishReadOnly       bool
+	// ClientSet,用于访问K8S的资源对象
+	client kubernetes.Interface
+	// 通过GRPC调用CSI插件Identity服务的GetPluginInfo接口获取CSI插件的名字作为这里的attacherName
+	attacherName string
+	// 用于执行卷的Attach/Detach动作，实际上时执行的CSI插件的ControllerPublishVolume/ControllerUnpublishVolume
+	attacher attacher.Attacher
+	// 用于获取CSI插件的Volume，直接上是通过GRPC调用ListVolumes接口
+	CSIVolumeLister VolumeLister
+	// 用于获取PV资源对象
+	pvLister corelisters.PersistentVolumeLister
+	// 用于获取CSINode资源对象
+	csiNodeLister storagelisters.CSINodeLister
+	// 用于获取VolumeAttachment资源对象
+	vaLister storagelisters.VolumeAttachmentLister
+	// VolumeAttachmentQueue以及PersistentVolumeQueue
+	vaQueue, pvQueue workqueue.RateLimitingInterface
+	// TODO 这个属性是干嘛的？
+	forceSync    map[string]bool
+	forceSyncMux sync.Mutex
+	// TODO 猜测是GRPC超时时间
+	timeout time.Duration
+	// TODO PublishReadOnly是CSI的什么特性？
+	supportsPublishReadOnly bool
+	// TODO SingleNodeMultiWriter是CSI的什么特性？
 	supportsSingleNodeMultiWriter bool
-	translator                    AttacherCSITranslator
-	defaultFSType                 string
+	// TODO 似乎是OutOfTree插件和InTree插件转换
+	translator AttacherCSITranslator
+	// TODO 这个属性也是非常重要
+	defaultFSType string
 }
 
 var _ Handler = &csiHandler{}
@@ -126,28 +140,34 @@ func (h *csiHandler) ReconcileVA() error {
 	defer cancel()
 
 	// Loop over all volume attachment objects
+	// 找到所有的VolumeAttachment资源对象
 	vas, err := h.vaLister.List(labels.Everything())
 	if err != nil {
 		return errors.New("failed to list all VolumeAttachment objects")
 	}
 
+	// 获取当前CSI插件的所有卷
 	published, err := h.CSIVolumeLister.ListVolumes(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to ListVolumes: %v", err)
 	}
 
+	// 遍历所有的VolumeAttachment资源对象
 	for _, va := range vas {
+		// 获取当前VolumeAttachment资源Spec.NodeName的CSI资源对象的NodeID
 		nodeID, err := h.getNodeID(h.attacherName, va.Spec.NodeName, va)
 		if err != nil {
 			klog.Warningf("Failed to find node ID err: %v", err)
 			continue
 		}
+		// 获取当前VolumeAttachment所指向的PersistentVolumeSpec
 		pvSpec, err := h.getProcessedPVSpec(va)
 		if err != nil {
 			klog.Warningf("Failed to get PV Spec: %v", err)
 			continue
 		}
 
+		// TODO 这里是在干嘛？
 		source, err := getCSISource(pvSpec)
 		if err != nil {
 			klog.Warningf("Failed to get CSI Source: %v", err)
@@ -191,6 +211,7 @@ func (h *csiHandler) ReconcileVA() error {
 			// processed again, we avoid UPDATE on the VA or forcing a direct
 			// attach/detach as to avoid race conditions with the main attacher
 			// queue
+			// TODO 重新入队
 			h.setForceSync(va.Name)
 			h.vaQueue.Add(va.Name)
 		}
@@ -400,6 +421,7 @@ func (h *csiHandler) getProcessedPVSpec(va *storage.VolumeAttachment) (*v1.Persi
 		if va.Spec.Source.InlineVolumeSpec != nil {
 			return nil, errors.New("both InlineCSIVolumeSource and PersistentVolumeName specified in VA source")
 		}
+		// 根据
 		pv, err := h.pvLister.Get(*va.Spec.Source.PersistentVolumeName)
 		if err != nil {
 			return nil, err
@@ -740,8 +762,10 @@ func (h *csiHandler) getCredentialsFromPV(csiSource *v1.CSIPersistentVolumeSourc
 
 // getNodeID finds node ID from CSINode API object. If caller wants, it can find
 // node ID stored in VolumeAttachment annotation.
+// 1、driver为当前CSI插件的驱动名字 nodeName为当前VA资源对象的Spec.NodeName属性，va则是当前需要处理的VolumeAttachment资源对象
 func (h *csiHandler) getNodeID(driver string, nodeName string, va *storage.VolumeAttachment) (string, error) {
 	// Try to find CSINode first.
+	// 获取当前节点的CSINode资源对象
 	csiNode, err := h.csiNodeLister.Get(nodeName)
 	if err == nil {
 		if nodeID, found := GetNodeIDFromCSINode(driver, csiNode); found {
@@ -762,6 +786,7 @@ func (h *csiHandler) getNodeID(driver string, nodeName string, va *storage.Volum
 	if va == nil {
 		return "", err
 	}
+	// 如果在K8S集群中没有找到所需要的CSINode资源对象，那么只能退而求其次从VolumeAttachment资源对象的元数据中获取NodeID
 	if nodeID, found := va.Annotations[vaNodeIDAnnotation]; found {
 		return nodeID, nil
 	}
