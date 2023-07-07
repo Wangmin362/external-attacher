@@ -388,9 +388,10 @@ func supportsControllerCapabilities(ctx context.Context, csiConn *grpc.ClientCon
 
 	// 当前CSI插件是否支持卷的Attach/Detach动作
 	supportsControllerPublish := caps[csi.ControllerServiceCapability_RPC_PUBLISH_UNPUBLISH_VOLUME]
-	// 当前
+	// TODO PublishOnly到底是什么特性？ 如何理解这个特性？
 	supportsPublishReadOnly := caps[csi.ControllerServiceCapability_RPC_PUBLISH_READONLY]
 	supportsListVolumesPublishedNodes := caps[csi.ControllerServiceCapability_RPC_LIST_VOLUMES] && caps[csi.ControllerServiceCapability_RPC_LIST_VOLUMES_PUBLISHED_NODES]
+	// TODO 这又是什么特性？
 	supportsSingleNodeMultiWriter := caps[csi.ControllerServiceCapability_RPC_SINGLE_NODE_MULTI_WRITER]
 	return supportsControllerPublish, supportsPublishReadOnly, supportsListVolumesPublishedNodes, supportsSingleNodeMultiWriter, nil
 }
