@@ -45,6 +45,13 @@ import (
 /* CSINode资源对象示例
 apiVersion: storage.k8s.io/v1
 kind: CSINode
+metadata:
+  name: node4
+  ownerReferences:
+  - apiVersion: v1
+    kind: Node
+    name: node4
+    uid: 0d9e4370-b3c3-4df8-8903-cb966546cb8c
 spec:
   drivers:
   - name: rook-ceph.cephfs.csi.ceph.com
@@ -53,6 +60,55 @@ spec:
   - name: rook-ceph.rbd.csi.ceph.com
     nodeID: node4
     topologyKeys: null
+
+---
+apiVersion: storage.k8s.io/v1
+kind: CSIDriver
+metadata:
+  name: rook-ceph.cephfs.csi.ceph.com
+spec:
+  attachRequired: true
+  podInfoOnMount: false
+  volumeLifecycleModes:
+  - Persistent
+
+---
+apiVersion: storage.k8s.io/v1
+kind: CSIDriver
+metadata:
+  name: rook-ceph.rbd.csi.ceph.com
+spec:
+  attachRequired: true
+  podInfoOnMount: false
+  volumeLifecycleModes:
+  - Persistent
+
+---
+apiVersion: storage.k8s.io/v1
+kind: VolumeAttachment
+metadata:
+  name: csi-f5be6a2c4d43375e407feacbbf39e4044726cb12e51e9713fa01cd624d69f534
+spec:
+  attacher: rook-ceph.cephfs.csi.ceph.com
+  nodeName: node5
+  source:
+    persistentVolumeName: pvc-9f9c1625-d720-4be5-ba38-425e9daa3bb9
+status:
+  attached: true
+
+---
+apiVersion: storage.k8s.io/v1
+kind: VolumeAttachment
+metadata:
+  name: csi-e2a29767d58939f353e3115eb30cced16030ff2071972222b723178a7fd30b1d
+spec:
+  attacher: rook-ceph.rbd.csi.ceph.com
+  nodeName: node4
+  source:
+    persistentVolumeName: pvc-0fc73a72-6086-44c5-9ef5-5e390e8d4d70
+status:
+  attached: true
+
 */
 
 const (
