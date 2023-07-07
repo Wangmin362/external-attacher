@@ -276,9 +276,11 @@ func main() {
 		supportsSingleNodeMultiWriter     bool
 	)
 	if !supportsService {
+		// TODO 什么情况下CSI插件可以不需要实现Controller服务？
 		handler = controller.NewTrivialHandler(clientset)
 		klog.V(2).Infof("CSI driver does not support Plugin Controller Service, using trivial handler")
 	} else {
+		// 通过GRPC调用CSI插件ControllerService服务的ControllerGetCapabilities接口获取CSI插件支持的能力
 		supportsAttach, supportsReadOnly, supportsListVolumesPublishedNodes, supportsSingleNodeMultiWriter, err = supportsControllerCapabilities(ctx, csiConn)
 		if err != nil {
 			klog.Error(err.Error())
@@ -384,7 +386,9 @@ func supportsControllerCapabilities(ctx context.Context, csiConn *grpc.ClientCon
 		return false, false, false, false, err
 	}
 
+	// 当前CSI插件是否支持卷的Attach/Detach动作
 	supportsControllerPublish := caps[csi.ControllerServiceCapability_RPC_PUBLISH_UNPUBLISH_VOLUME]
+	// 当前
 	supportsPublishReadOnly := caps[csi.ControllerServiceCapability_RPC_PUBLISH_READONLY]
 	supportsListVolumesPublishedNodes := caps[csi.ControllerServiceCapability_RPC_LIST_VOLUMES] && caps[csi.ControllerServiceCapability_RPC_LIST_VOLUMES_PUBLISHED_NODES]
 	supportsSingleNodeMultiWriter := caps[csi.ControllerServiceCapability_RPC_SINGLE_NODE_MULTI_WRITER]
