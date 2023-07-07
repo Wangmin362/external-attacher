@@ -35,6 +35,12 @@ type Attacher interface {
 	// status.
 	// 1、Attach这个动作可以理解为把磁盘插入到某个节点上，更通俗的来说就是把磁盘插入到一台主机上，此时节点可见，但是内部的容器不可见
 	// 2、实际上内部调用的时CSI存储插件的ControllerPublishVolume方法
+	// 3、每个字段的含义：
+	// 3.1、TODO volumeID
+	// 3.2、TODO readOnly
+	// 3.3、TODO nodeID
+	// 3.4、TODO caps
+	// 3.5、attributes, secrets
 	Attach(ctx context.Context, volumeID string, readOnly bool, nodeID string, caps *csi.VolumeCapability, attributes, secrets map[string]string) (metadata map[string]string, detached bool, err error)
 
 	// Detach given volume from given node.

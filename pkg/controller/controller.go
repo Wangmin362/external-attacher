@@ -67,6 +67,7 @@ type CSIAttachController struct {
 
 // Handler is responsible for handling VolumeAttachment events from informer.
 type Handler interface {
+	// Init TODO 这里初始化了个啥？
 	Init(vaQueue workqueue.RateLimitingInterface, pvQueue workqueue.RateLimitingInterface)
 
 	// SyncNewOrUpdatedVolumeAttachment processes one Add/Updated event from
@@ -137,7 +138,9 @@ func (ctrl *CSIAttachController) Run(workers int, stopCh <-chan struct{}) {
 		return
 	}
 	for i := 0; i < workers; i++ {
+		// TODO 从VAQueue中取出元素并处理VolumeAttachment资源对象
 		go wait.Until(ctrl.syncVA, 0, stopCh)
+		// TODO 从PVQueue中取出元素并处理PersistentVolume资源对象
 		go wait.Until(ctrl.syncPV, 0, stopCh)
 	}
 

@@ -136,6 +136,7 @@ var (
 	leaderElectionRenewDeadline = flag.Duration("leader-election-renew-deadline", 10*time.Second, "Duration, in seconds, that the acting leader will retry refreshing leadership before giving up. Defaults to 10 seconds.")
 	leaderElectionRetryPeriod   = flag.Duration("leader-election-retry-period", 5*time.Second, "Duration, in seconds, the LeaderElector clients should wait between tries of actions. Defaults to 5 seconds.")
 
+	// TODO Volume Attach到节点上的默认文件类型，默认是空的
 	defaultFSType = flag.String("default-fstype", "", "The default filesystem type of the volume to publish. Defaults to empty string")
 
 	reconcileSync = flag.Duration("reconcile-sync", 1*time.Minute, "Resync interval of the VolumeAttachment reconciler.")
@@ -271,7 +272,7 @@ func main() {
 	var (
 		supportsAttach                    bool
 		supportsReadOnly                  bool
-		supportsListVolumesPublishedNodes bool // 这个参数觉得external-attacher是否监听VolumeAttachment资源对象并进行Reconcile
+		supportsListVolumesPublishedNodes bool // 这个参数决定external-attacher是否监听VolumeAttachment资源对象并进行Reconcile
 		supportsSingleNodeMultiWriter     bool
 	)
 	if !supportsService {
@@ -284,6 +285,8 @@ func main() {
 			os.Exit(1)
 		}
 
+		// 如果CSI存储插件支持Attach/Detach Volume，那么就需要处理VolumeAttachment资源对象，并调用CSI存储插件的
+		// ControllerPublishVolume以及ControllerUnpublishVolume方法进行Volume的Attach/Detach动作
 		if supportsAttach {
 			pvLister := factory.Core().V1().PersistentVolumes().Lister()
 			vaLister := factory.Storage().V1().VolumeAttachments().Lister()
