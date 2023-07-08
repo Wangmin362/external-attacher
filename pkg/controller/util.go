@@ -147,6 +147,7 @@ func GetVolumeCapabilities(pvSpec *v1.PersistentVolumeSpec, singleNodeMultiWrite
 	}
 
 	var cap *csi.VolumeCapability
+	// 如果当前卷是块存储卷
 	if pvSpec.VolumeMode != nil && *pvSpec.VolumeMode == v1.PersistentVolumeBlock {
 		cap = &csi.VolumeCapability{
 			AccessType: &csi.VolumeCapability_Block{
@@ -173,6 +174,7 @@ func GetVolumeCapabilities(pvSpec *v1.PersistentVolumeSpec, singleNodeMultiWrite
 		}
 	}
 
+	// 通过PV设置的AccessMode（用户期望的卷访问模式）以及SP是否支持当个节点多个Pod同时读写能力，获取当前卷的AccessMode
 	am, err := accessmodes.ToCSIAccessMode(pvSpec.AccessModes, singleNodeMultiWriterCapable)
 	if err != nil {
 		return nil, err

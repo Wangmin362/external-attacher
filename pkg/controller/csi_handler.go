@@ -85,7 +85,7 @@ type csiHandler struct {
 	supportsSingleNodeMultiWriter bool
 	// TODO 似乎是OutOfTree插件和InTree插件转换
 	translator AttacherCSITranslator
-	// TODO 这个属性也是非常重要
+	// 默认的文件类型是通过命令行参数指定的，默认为空
 	defaultFSType string
 }
 
@@ -246,16 +246,16 @@ func (h *csiHandler) SyncNewOrUpdatedVolumeAttachment(va *storage.VolumeAttachme
 
 	var err error
 	if va.DeletionTimestamp == nil {
-		// 说明是创建或者更新VolumeAttachment
+		// TODO 说明是创建或者更新VolumeAttachment
 		err = h.syncAttach(va)
 	} else {
-		// 删除时间不为空，说明时删除VolumeAttachment
+		// 删除时间不为空，说明是删除VolumeAttachment
 		err = h.syncDetach(va)
 	}
 	if err != nil {
 		// Re-queue with exponential backoff
 		klog.V(2).Infof("Error processing %q: %s", va.Name, err)
-		// 如果VA资源处理异常，那么再次把VA资源对象放入到队列当中
+		// 如果VA资源处理异常，那么再次把VA资源对象放入到队列当中，下一次重新处理
 		h.vaQueue.AddRateLimited(va.Name)
 		return
 	}
@@ -266,6 +266,7 @@ func (h *csiHandler) SyncNewOrUpdatedVolumeAttachment(va *storage.VolumeAttachme
 }
 
 func (h *csiHandler) syncAttach(va *storage.VolumeAttachment) error {
+	// TODO consumeForceSync是在干什么？
 	if !h.consumeForceSync(va.Name) && va.Status.Attached {
 		// Volume is attached and no force sync, there is nothing to be done.
 		klog.V(4).Infof("%q is already attached", va.Name)
@@ -274,6 +275,7 @@ func (h *csiHandler) syncAttach(va *storage.VolumeAttachment) error {
 
 	// Attach and report any error
 	klog.V(2).Infof("Attaching %q", va.Name)
+	// 把VolumeAttachment所对应的卷Attach到节点上
 	va, metadata, err := h.csiAttach(va)
 	if err != nil {
 		var saveErr error
@@ -354,6 +356,7 @@ func (h *csiHandler) prepareVANodeID(va *storage.VolumeAttachment, nodeID string
 }
 
 func (h *csiHandler) addPVFinalizer(pv *v1.PersistentVolume) (*v1.PersistentVolume, error) {
+	// 给当前的PV资源对象设置external-attacher/<CSI名字>的Finalizer，将来这个PV被删除的时候需要被external-attacher处理
 	finalizerName := GetFinalizerName(h.attacherName)
 	for _, f := range pv.Finalizers {
 		if f == finalizerName {
@@ -456,19 +459,23 @@ func (h *csiHandler) csiAttach(va *storage.VolumeAttachment) (*storage.VolumeAtt
 		if va.Spec.Source.InlineVolumeSpec != nil {
 			return va, nil, errors.New("both InlineCSIVolumeSource and PersistentVolumeName specified in VA source")
 		}
+		// 通过从VolumeAttachment获取到的PV名字在Informer中查找
 		pv, err := h.pvLister.Get(*va.Spec.Source.PersistentVolumeName)
 		if err != nil {
 			return va, nil, err
 		}
 		// Refuse to attach volumes that are marked for deletion.
+		// 如果当前PV已经被删除，也就没有再继续Attach的必要了
 		if pv.DeletionTimestamp != nil {
 			return va, nil, fmt.Errorf("PersistentVolume %q is marked for deletion", pv.Name)
 		}
+		// 给当前的PV资源对象设置external-attacher/<CSI名字>的Finalizer，将来这个PV被删除的时候需要被external-attacher处理
 		pv, err = h.addPVFinalizer(pv)
 		if err != nil {
 			return va, nil, fmt.Errorf("could not add PersistentVolume finalizer: %s", err)
 		}
 
+		// TODO 如果当前PV是从InTree的CSI插件迁移过来的
 		if h.translator.IsPVMigratable(pv) {
 			pv, err = h.translator.TranslateInTreePVToCSI(pv)
 			if err != nil {
@@ -479,6 +486,7 @@ func (h *csiHandler) csiAttach(va *storage.VolumeAttachment) (*storage.VolumeAtt
 
 		// Both csiSource and pvSpec could be translated here if the PV was
 		// migrated
+		// 获取PV资源的CSI
 		csiSource, err = getCSISource(&pv.Spec)
 		if err != nil {
 			return va, nil, err
@@ -486,6 +494,7 @@ func (h *csiHandler) csiAttach(va *storage.VolumeAttachment) (*storage.VolumeAtt
 
 		pvSpec = &pv.Spec
 	} else if va.Spec.Source.InlineVolumeSpec != nil {
+		// TODO inlineVolume是什么？
 		if va.Spec.Source.InlineVolumeSpec.CSI != nil {
 			csiSource = va.Spec.Source.InlineVolumeSpec.CSI
 		} else {
@@ -497,26 +506,31 @@ func (h *csiHandler) csiAttach(va *storage.VolumeAttachment) (*storage.VolumeAtt
 		return va, nil, errors.New("neither InlineCSIVolumeSource nor PersistentVolumeName specified in VA source")
 	}
 
+	// 获取PV.Spec.CSI.VolumeAttributes属性，这个属性应该是要传递给CSI插件
 	attributes, err := GetVolumeAttributes(csiSource)
 	if err != nil {
 		return va, nil, err
 	}
 
+	// TODO 这里的volumeHandler是干啥的？
 	volumeHandle, readOnly, err := GetVolumeHandle(csiSource)
 	if err != nil {
 		return va, nil, err
 	}
+	// 如果CSI插件不支持以只读的方式挂载存储卷到Node之上
 	if !h.supportsPublishReadOnly {
 		// "CO MUST set this field to false if SP does not have the
 		// PUBLISH_READONLY controller capability"
 		readOnly = false
 	}
 
+	// 通过用户期望的卷访问模式以及SP是否支持SINGLE_NODE_MULTI_WRITER能力获取卷的访问模式
 	volumeCapabilities, err := GetVolumeCapabilities(pvSpec, h.supportsSingleNodeMultiWriter, h.defaultFSType)
 	if err != nil {
 		return va, nil, err
 	}
 
+	// 如果设置了Attach卷需要的密码，那么获取密码
 	secrets, err := h.getCredentialsFromPV(csiSource)
 	if err != nil {
 		return va, nil, err
@@ -528,9 +542,12 @@ func (h *csiHandler) csiAttach(va *storage.VolumeAttachment) (*storage.VolumeAtt
 	}
 
 	originalVA := va
+	// 获取VA的external-attacher/<CSI插件名>的Finalizer
 	va, finalizerAdded := h.prepareVAFinalizer(va)
+	// 设置VA的注解
 	va, nodeIDAdded := h.prepareVANodeID(va, nodeID)
 
+	// 如果VA的Finalizer或者是注解有修改，那么修改VA资源对象
 	if finalizerAdded || nodeIDAdded {
 		if va, err = h.patchVA(originalVA, va); err != nil {
 			return originalVA, nil, fmt.Errorf("could not save VolumeAttachment: %s", err)
@@ -542,6 +559,7 @@ func (h *csiHandler) csiAttach(va *storage.VolumeAttachment) (*storage.VolumeAtt
 	defer cancel()
 	// We're not interested in `detached` return value, the controller will
 	// issue Detach to be sure the volume is really detached.
+	// 通过GRPC调用CSI插件的ControllerPublishVolume方法把存储卷Attach到节点上
 	publishInfo, _, err := h.attacher.Attach(ctx, volumeHandle, readOnly, nodeID, volumeCapabilities, attributes, secrets)
 	if err != nil {
 		return va, nil, err
@@ -582,6 +600,7 @@ func (h *csiHandler) csiDetach(va *storage.VolumeAttachment) (*storage.VolumeAtt
 		return va, errors.New("neither InlineCSIVolumeSource nor PersistentVolumeName specified in VA source")
 	}
 
+	// TODO volumeHandler似乎是SP创建的存储卷的名字
 	volumeHandle, _, err := GetVolumeHandle(csiSource)
 	if err != nil {
 		return va, err
@@ -599,6 +618,7 @@ func (h *csiHandler) csiDetach(va *storage.VolumeAttachment) (*storage.VolumeAtt
 	ctx, cancel := context.WithTimeout(context.Background(), h.timeout)
 	ctx = markAsMigrated(ctx, migratable)
 	defer cancel()
+	// 通过GRPC调用CSI插件的ControllerUnpublishVolume从节点上Detach卷
 	err = h.attacher.Detach(ctx, volumeHandle, nodeID, secrets)
 	if err != nil {
 		// The volume may not be fully detached. Save the error and try again
@@ -677,7 +697,7 @@ func (h *csiHandler) SyncNewOrUpdatedPersistentVolume(pv *v1.PersistentVolume) {
 	}
 
 	// Check if the PV has finalizer
-	// 获取Finalizer
+	// 获取external-attacher/<CSI名字> Finalizer
 	finalizer := GetFinalizerName(h.attacherName)
 	found := false
 	for _, f := range pv.Finalizers {
@@ -686,6 +706,7 @@ func (h *csiHandler) SyncNewOrUpdatedPersistentVolume(pv *v1.PersistentVolume) {
 			break
 		}
 	}
+	// 如果没有找到注解，直接忽略这个PV
 	if !found {
 		// No finalizer -> no action required
 		klog.V(4).Infof("CSIHandler: processing PV %q: no finalizer, ignoring", pv.Name)

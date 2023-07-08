@@ -46,7 +46,10 @@ const (
 
 // CSIAttachController is a controller that attaches / detaches CSI volumes using provided Handler interface
 type CSIAttachController struct {
-	client        kubernetes.Interface
+	client kubernetes.Interface
+	// 1、这里的AttacherName实际上就是CSI插件的名字，这个名字通过GRPC调用CSI插件的Identity服务的GetPluginInfo接口获取
+	// 2、每一种external-attacher都是伴随着一种CSI插件部署在一个Pod当中的，而这个external-attacher就是为了处理这个当前和它部署在
+	// 一起的CSI插件相关的VolumeAttachment资源对象，因此external-attacher就是跟着CSI插件姓的。似乎有点嫁鸡随鸡、家狗随狗的意味！！！
 	attacherName  string
 	handler       Handler
 	eventRecorder record.EventRecorder
@@ -58,6 +61,8 @@ type CSIAttachController struct {
 	pvLister       corelisters.PersistentVolumeLister
 	pvListerSynced cache.InformerSynced
 
+	// 实际上，这个值是通过supportsListVolumesPublishedNodes变量传进来的，也就是说如果CSI创建支持列出某个节点上已经创建并且Attach
+	// 的卷，那么external-attacher就需要对于VolumeAttachment做处理
 	shouldReconcileVolumeAttachment bool
 	reconcileSync                   time.Duration
 	translator                      AttacherCSITranslator
@@ -106,20 +111,22 @@ func NewCSIAttachController(client kubernetes.Interface, attacherName string, ha
 	}
 
 	volumeAttachmentInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    ctrl.vaAdded,
-		UpdateFunc: ctrl.vaUpdated,
-		DeleteFunc: ctrl.vaDeleted,
+		AddFunc:    ctrl.vaAdded,   // 监听VolumeAttachment的创建
+		UpdateFunc: ctrl.vaUpdated, // 监听VolumeAttachment的更新
+		DeleteFunc: ctrl.vaDeleted, // 监听VolumeAttachment的删除
 	})
 	ctrl.vaLister = volumeAttachmentInformer.Lister()
 	ctrl.vaListerSynced = volumeAttachmentInformer.Informer().HasSynced
 
 	pvInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    ctrl.pvAdded,
-		UpdateFunc: ctrl.pvUpdated,
+		AddFunc:    ctrl.pvAdded,   // 监听PV的创建
+		UpdateFunc: ctrl.pvUpdated, // 监听PV的更新
 		//DeleteFunc: ctrl.pvDeleted, TODO: do we need this?
 	})
 	ctrl.pvLister = pvInformer.Lister()
+	// 用于判断PV是否已经同步完成
 	ctrl.pvListerSynced = pvInformer.Informer().HasSynced
+	// 给Handler初始化VAQueue以及PVQueue
 	ctrl.handler.Init(ctrl.vaQueue, ctrl.pvQueue)
 
 	return ctrl
@@ -133,6 +140,7 @@ func (ctrl *CSIAttachController) Run(workers int, stopCh <-chan struct{}) {
 	klog.Infof("Starting CSI attacher")
 	defer klog.Infof("Shutting CSI attacher")
 
+	// 等待VolumeAttachment, PV资源同步完成
 	if !cache.WaitForCacheSync(stopCh, ctrl.vaListerSynced, ctrl.pvListerSynced) {
 		klog.Errorf("Cannot sync caches")
 		return
@@ -146,6 +154,7 @@ func (ctrl *CSIAttachController) Run(workers int, stopCh <-chan struct{}) {
 
 	if ctrl.shouldReconcileVolumeAttachment {
 		go wait.Until(func() {
+			// TODO 这里是在处理什么？
 			err := ctrl.handler.ReconcileVA()
 			if err != nil {
 				klog.Errorf("Failed to reconcile volume attachments: %v", err)
@@ -205,6 +214,7 @@ func (ctrl *CSIAttachController) pvUpdated(old, new interface{}) {
 
 // syncVA deals with one key off the queue.  It returns false when it's time to quit.
 func (ctrl *CSIAttachController) syncVA() {
+	// 从VA对列中取出一个VolumeAttachment资源对象
 	key, quit := ctrl.vaQueue.Get()
 	if quit {
 		return
@@ -214,23 +224,28 @@ func (ctrl *CSIAttachController) syncVA() {
 	vaName := key.(string)
 	klog.V(4).Infof("Started VA processing %q", vaName)
 
-	// get VolumeAttachment to process
+	// 通过VA的名字在Informer中查找VolumeAttachment资源对象
 	va, err := ctrl.vaLister.Get(vaName)
 	if err != nil {
+		// 如果没有找到，那么直接从VA队列中删除这个元素。
 		if apierrs.IsNotFound(err) {
 			// VolumeAttachment was deleted in the meantime, ignore.
 			klog.V(3).Infof("VA %q deleted, ignoring", vaName)
 			return
 		}
 		klog.Errorf("Error getting VolumeAttachment %q: %v", vaName, err)
+		// 否则如果是其它错误（可能是网络错误），就把这个资源对象重新加入到VA队列当中
 		ctrl.vaQueue.AddRateLimited(vaName)
 		return
 	}
+
+	// 每隔被部署的external-attacher只能处理和自己部署在同一个Pod当中的CSI插件关心的VolumeAttacher。对于自己不关心的VolumeAttachment
+	// 资源对象，一概忽视
 	if va.Spec.Attacher != ctrl.attacherName {
 		klog.V(4).Infof("Skipping VolumeAttachment %s for attacher %s", va.Name, va.Spec.Attacher)
 		return
 	}
-	// 处理VolumeAttachment
+	// TODO 处理VolumeAttachment
 	ctrl.handler.SyncNewOrUpdatedVolumeAttachment(va)
 }
 
@@ -266,7 +281,7 @@ func (ctrl *CSIAttachController) syncPV() {
 	pvName := key.(string)
 	klog.V(4).Infof("Started PV processing %q", pvName)
 
-	// get PV to process
+	// 从Informer中获取PV
 	pv, err := ctrl.pvLister.Get(pvName)
 	if err != nil {
 		if apierrs.IsNotFound(err) {

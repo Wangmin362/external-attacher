@@ -61,6 +61,7 @@ spec:
     nodeID: node4
     topologyKeys: null
 
+
 ---
 apiVersion: storage.k8s.io/v1
 kind: CSIDriver
@@ -72,6 +73,7 @@ spec:
   volumeLifecycleModes:
   - Persistent
 
+
 ---
 apiVersion: storage.k8s.io/v1
 kind: CSIDriver
@@ -82,6 +84,7 @@ spec:
   podInfoOnMount: false
   volumeLifecycleModes:
   - Persistent
+
 
 ---
 apiVersion: storage.k8s.io/v1
@@ -96,6 +99,7 @@ spec:
 status:
   attached: true
 
+
 ---
 apiVersion: storage.k8s.io/v1
 kind: VolumeAttachment
@@ -109,6 +113,50 @@ spec:
 status:
   attached: true
 
+
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  annotations:
+    pv.kubernetes.io/provisioned-by: rook-ceph.cephfs.csi.ceph.com
+  finalizers:
+  - kubernetes.io/pv-protection
+  name: pvc-eba56f4a-5d88-4a79-a01c-e171af8e003d
+spec:
+  accessModes:
+  - ReadWriteMany
+  capacity:
+    storage: 80Gi
+  claimRef:
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    name: shared-volume-1000241
+    namespace: gator-cloud-1000241
+    resourceVersion: "241805142"
+    uid: eba56f4a-5d88-4a79-a01c-e171af8e003d
+  csi:
+    controllerExpandSecretRef:
+      name: rook-csi-cephfs-provisioner
+      namespace: rook-ceph
+    driver: rook-ceph.cephfs.csi.ceph.com
+    nodeStageSecretRef:
+      name: rook-csi-cephfs-node
+      namespace: rook-ceph
+    volumeAttributes:
+      clusterID: rook-ceph
+      fsName: myfs
+      mounter: kernel
+      pool: myfs-data0
+      storage.kubernetes.io/csiProvisionerIdentity: 1682664599088-8081-rook-ceph.cephfs.csi.ceph.com
+      subvolumeName: csi-vol-a3e034aa-f528-11ed-86ec-96c8af6ed5cf
+      subvolumePath: /volumes/csi/csi-vol-a3e034aa-f528-11ed-86ec-96c8af6ed5cf/c59a5a9c-2e42-403b-992a-12d01adbfefe
+    volumeHandle: 0001-0009-rook-ceph-0000000000000001-a3e034aa-f528-11ed-86ec-96c8af6ed5cf
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: rook-ceph-fs
+  volumeMode: Filesystem
+status:
+  phase: Bound
 */
 
 const (
@@ -280,7 +328,11 @@ func main() {
 		handler = controller.NewTrivialHandler(clientset)
 		klog.V(2).Infof("CSI driver does not support Plugin Controller Service, using trivial handler")
 	} else {
-		// 通过GRPC调用CSI插件ControllerService服务的ControllerGetCapabilities接口获取CSI插件支持的能力
+		// 1、通过GRPC调用CSI插件ControllerService服务的ControllerGetCapabilities接口获取CSI插件支持的能力
+		// 2、supportsAttach：当前CSI插件是否支持Attach/Detach动作
+		// 3、supportsReadOnly: 当前CSI插件是否支持以只读的模式Attach到某个节点上
+		// 4、supportsListVolumesPublishedNodes：当前CSI插件是否支持列出某个节点上已经创建并且Attach的卷
+		// 5、supportsSingleNodeMultiWriter：当前CSI插件是否支持把持久卷挂载到单个节点上，并且支持多个Pod同时进行读写
 		supportsAttach, supportsReadOnly, supportsListVolumesPublishedNodes, supportsSingleNodeMultiWriter, err = supportsControllerCapabilities(ctx, csiConn)
 		if err != nil {
 			klog.Error(err.Error())
@@ -322,6 +374,7 @@ func main() {
 		klog.V(2).Infof("CSI driver supports list volumes published nodes. Using capability to reconcile volume attachment objects with actual backend state")
 	}
 
+	// 实例化CSIAttach控制器
 	ctrl := controller.NewCSIAttachController(
 		clientset,
 		csiAttacher,
@@ -336,7 +389,9 @@ func main() {
 
 	run := func(ctx context.Context) {
 		stopCh := ctx.Done()
+		// 启动Informer，开始缓存关心的资源对象
 		factory.Start(stopCh)
+		// TODO 启动CSIAttach控制器
 		ctrl.Run(int(*workerThreads), stopCh)
 	}
 
@@ -388,10 +443,11 @@ func supportsControllerCapabilities(ctx context.Context, csiConn *grpc.ClientCon
 
 	// 当前CSI插件是否支持卷的Attach/Detach动作
 	supportsControllerPublish := caps[csi.ControllerServiceCapability_RPC_PUBLISH_UNPUBLISH_VOLUME]
-	// TODO PublishOnly到底是什么特性？ 如何理解这个特性？
+	// TODO 所谓的PublishReadonly特性，实际上就是当前的CSI插件支持以只读的方式把存储卷挂载到Node节点上
 	supportsPublishReadOnly := caps[csi.ControllerServiceCapability_RPC_PUBLISH_READONLY]
+	// 是否支持列出某个列出某个节点已经Attach的卷
 	supportsListVolumesPublishedNodes := caps[csi.ControllerServiceCapability_RPC_LIST_VOLUMES] && caps[csi.ControllerServiceCapability_RPC_LIST_VOLUMES_PUBLISHED_NODES]
-	// TODO 这又是什么特性？
+	// 是否支持把持久卷挂载到单个节点上，并且这个Volume可以被多个Pod同时读写
 	supportsSingleNodeMultiWriter := caps[csi.ControllerServiceCapability_RPC_SINGLE_NODE_MULTI_WRITER]
 	return supportsControllerPublish, supportsPublishReadOnly, supportsListVolumesPublishedNodes, supportsSingleNodeMultiWriter, nil
 }
